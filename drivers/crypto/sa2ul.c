@@ -1200,8 +1200,7 @@ static int sa_run(struct sa_req *req)
 	rxd->enc = req->enc;
 	rxd->iv_idx = req->ctx->iv_idx;
 	rxd->enc_iv_size = sa_ctx->cmdl_upd_info.enc_iv.size;
-	rxd->tx_in->callback = req->callback;
-	rxd->tx_in->callback_param = rxd;
+	dmaengine_desc_set_callback(rxd->tx_in, req->callback, NULL, rxd);
 
 	tx_out = dmaengine_prep_slave_sg(pdata->dma_tx, src,
 					 src_nents, DMA_MEM_TO_DEV,

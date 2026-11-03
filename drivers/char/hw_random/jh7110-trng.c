@@ -5,24 +5,27 @@
  * Copyright (C) 2022 StarFive Technology Co.
  */
 
+#include <linux/bits.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
-#include <linux/delay.h>
+#include <linux/container_of.h>
+#include <linux/device.h>
 #include <linux/devm-helpers.h>
 #include <linux/err.h>
+#include <linux/errno.h>
 #include <linux/hw_random.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
-#include <linux/kernel.h>
+#include <linux/jiffies.h>
 #include <linux/lockdep.h>
+#include <linux/minmax.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
-#include <linux/random.h>
 #include <linux/reset.h>
+#include <linux/types.h>
 #include <linux/workqueue.h>
 
 /* trng register offset */
@@ -93,12 +96,7 @@
 
 #define to_trng(p)			container_of(p, struct starfive_trng, rng)
 
-enum reseed {
-	RANDOM_RESEED,
-	NONCE_RESEED,
-};
-
-enum mode {
+enum starfive_trng_mode {
 	PRNG_128BIT,
 	PRNG_256BIT,
 };
@@ -116,7 +114,6 @@ struct starfive_trng {
 	struct work_struct	work;
 	u32			mode;
 	u32			mission;
-	u32			reseed;
 	bool			need_reseed;
 	bool			initialized;
 	bool			clk_on;
@@ -372,7 +369,7 @@ unlock:
 static irqreturn_t starfive_trng_irq(int irq, void *priv)
 {
 	u32 status;
-	struct starfive_trng *trng = (struct starfive_trng *)priv;
+	struct starfive_trng *trng = priv;
 
 	status = readl(trng->base + STARFIVE_ISTAT) & STARFIVE_ISTAT_ALL;
 	if (!status)
@@ -491,9 +488,9 @@ static int starfive_trng_read(struct hwrng *rng, void *buf, size_t max, bool wai
 	}
 
 	if (trng->mode == PRNG_256BIT)
-		max = min_t(size_t, max, (STARFIVE_RAND_LEN * 8));
+		max = min(max, STARFIVE_RAND_LEN * 8);
 	else
-		max = min_t(size_t, max, (STARFIVE_RAND_LEN * 4));
+		max = min(max, STARFIVE_RAND_LEN * 4);
 
 	memcpy_fromio(buf, trng->base + STARFIVE_RAND0, max);
 
@@ -510,20 +507,21 @@ out_put:
 
 static int starfive_trng_probe(struct platform_device *pdev)
 {
-	int ret;
+	struct device *dev = &pdev->dev;
 	struct starfive_trng *trng;
+	int ret;
 
-	trng = devm_kzalloc(&pdev->dev, sizeof(*trng), GFP_KERNEL);
+	trng = devm_kzalloc(dev, sizeof(*trng), GFP_KERNEL);
 	if (!trng)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, trng);
-	trng->dev = &pdev->dev;
+	trng->dev = dev;
 
 	trng->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(trng->base))
-		return dev_err_probe(&pdev->dev, PTR_ERR(trng->base),
-				     "Error remapping memory for platform device.\n");
+		return dev_err_probe(dev, PTR_ERR(trng->base),
+				     "Error remapping memory for platform device\n");
 
 	trng->irq = platform_get_irq(pdev, 0);
 	if (trng->irq < 0)
@@ -532,63 +530,62 @@ static int starfive_trng_probe(struct platform_device *pdev)
 	init_completion(&trng->random_done);
 	init_completion(&trng->reseed_done);
 
-	ret = devm_mutex_init(&pdev->dev, &trng->lock);
+	ret = devm_mutex_init(dev, &trng->lock);
 	if (ret)
 		return ret;
 
-	trng->hclk = devm_clk_get(&pdev->dev, "hclk");
+	trng->hclk = devm_clk_get(dev, "hclk");
 	if (IS_ERR(trng->hclk))
-		return dev_err_probe(&pdev->dev, PTR_ERR(trng->hclk),
+		return dev_err_probe(dev, PTR_ERR(trng->hclk),
 				     "Error getting hardware reference clock\n");
 
-	trng->ahb = devm_clk_get(&pdev->dev, "ahb");
+	trng->ahb = devm_clk_get(dev, "ahb");
 	if (IS_ERR(trng->ahb))
-		return dev_err_probe(&pdev->dev, PTR_ERR(trng->ahb),
+		return dev_err_probe(dev, PTR_ERR(trng->ahb),
 				     "Error getting ahb reference clock\n");
 
-	trng->rst = devm_reset_control_get_shared(&pdev->dev, NULL);
+	trng->rst = devm_reset_control_get_shared(dev, NULL);
 	if (IS_ERR(trng->rst))
-		return dev_err_probe(&pdev->dev, PTR_ERR(trng->rst),
+		return dev_err_probe(dev, PTR_ERR(trng->rst),
 				     "Error getting hardware reset line\n");
 
 	ret = starfive_trng_power_on(trng);
 	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "Failed to power on\n");
+		return dev_err_probe(dev, ret, "Failed to power on\n");
 
-	ret = devm_add_action_or_reset(&pdev->dev, starfive_trng_power_off_action, trng);
+	ret = devm_add_action_or_reset(dev, starfive_trng_power_off_action, trng);
 	if (ret)
 		return ret;
 
-	trng->rng.name = dev_driver_string(&pdev->dev);
+	trng->rng.name = dev_driver_string(dev);
 	trng->rng.init = starfive_trng_init;
 	trng->rng.cleanup = starfive_trng_cleanup;
 	trng->rng.read = starfive_trng_read;
 
 	trng->mode = PRNG_256BIT;
 	trng->mission = 1;
-	trng->reseed = RANDOM_RESEED;
 
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 100);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_set_autosuspend_delay(dev, 100);
 
-	ret = devm_pm_runtime_set_active_enabled(&pdev->dev);
+	ret = devm_pm_runtime_set_active_enabled(dev);
 	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "Failed to enable runtime PM\n");
+		return dev_err_probe(dev, ret, "Failed to enable runtime PM\n");
 
-	ret = devm_work_autocancel(&pdev->dev, &trng->work, starfive_trng_reseed_work);
-	if (ret)
-		return ret;
-
-	ret = devm_request_irq(&pdev->dev, trng->irq, starfive_trng_irq, IRQF_NO_AUTOEN,
-			       pdev->name, (void *)trng);
+	ret = devm_work_autocancel(dev, &trng->work, starfive_trng_reseed_work);
 	if (ret)
 		return ret;
 
-	ret = devm_hwrng_register(&pdev->dev, &trng->rng);
+	ret = devm_request_irq(dev, trng->irq, starfive_trng_irq, IRQF_NO_AUTOEN,
+			       dev_name(dev), trng);
 	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "Failed to register hwrng\n");
+		return ret;
 
-	pm_runtime_idle(&pdev->dev);
+	ret = devm_hwrng_register(dev, &trng->rng);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to register hwrng\n");
+
+	pm_runtime_idle(dev);
 
 	return 0;
 }
@@ -629,7 +626,7 @@ static int starfive_trng_resume(struct device *dev)
 	return 0;
 }
 
-static const struct of_device_id trng_dt_ids[] __maybe_unused = {
+static const struct of_device_id trng_dt_ids[] = {
 	{ .compatible = "starfive,jh7110-trng" },
 	{ }
 };
@@ -643,7 +640,7 @@ static struct platform_driver starfive_trng_driver = {
 	.driver	= {
 		.name		= "jh7110-trng",
 		.pm		= pm_ptr(&starfive_trng_pm_ops),
-		.of_match_table	= of_match_ptr(trng_dt_ids),
+		.of_match_table	= trng_dt_ids,
 	},
 };
 

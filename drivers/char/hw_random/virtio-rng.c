@@ -150,17 +150,17 @@ static void virtio_cleanup(struct hwrng *rng)
 
 static int probe_common(struct virtio_device *vdev)
 {
-	int err, index;
-	struct virtrng_info *vi = NULL;
+	int err;
+	struct virtrng_info *vi;
 
 	vi = kzalloc_obj(struct virtrng_info);
 	if (!vi)
 		return -ENOMEM;
 
-	vi->index = index = ida_alloc(&rng_index_ida, GFP_KERNEL);
-	if (index < 0) {
-		err = index;
-		goto err_ida;
+	vi->index = ida_alloc(&rng_index_ida, GFP_KERNEL);
+	if (vi->index < 0) {
+		err = vi->index;
+		goto err;
 	}
 	snprintf(vi->name, sizeof(vi->name), "virtio_rng.%d", vi->index);
 	init_completion(&vi->have_data);
@@ -177,7 +177,8 @@ static int probe_common(struct virtio_device *vdev)
 	vi->vq = virtio_find_single_vq(vdev, random_recv_done, "input");
 	if (IS_ERR(vi->vq)) {
 		err = PTR_ERR(vi->vq);
-		goto err_find;
+		ida_free(&rng_index_ida, vi->index);
+		goto err;
 	}
 
 	virtio_device_ready(vdev);
@@ -187,9 +188,7 @@ static int probe_common(struct virtio_device *vdev)
 
 	return 0;
 
-err_find:
-	ida_free(&rng_index_ida, index);
-err_ida:
+err:
 	vdev->priv = NULL;
 	kfree(vi);
 	return err;

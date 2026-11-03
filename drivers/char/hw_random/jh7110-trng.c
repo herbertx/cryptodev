@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * TRNG driver for the StarFive JH7110 SoC
+ * TRNG driver for the StarFive JH7110/JHB100 SoCs
  *
  * Copyright (C) 2022 StarFive Technology Co.
  */
@@ -24,6 +24,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/reset.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
@@ -101,6 +102,22 @@ enum starfive_trng_mode {
 	PRNG_256BIT,
 };
 
+/*
+ * Power-down ordering of reset assertion vs. clock gating:
+ * SEQ_RST_FIRST - assert reset, then gate the clocks (JH7110).
+ * SEQ_CLK_FIRST - gate the clocks, then assert reset (JHB100). Asserting
+ *                 reset with the clocks running causes reset-domain-crossing
+ *                 glitches that can affect downstream IPs.
+ */
+enum seq_rst_clk {
+	SEQ_RST_FIRST,
+	SEQ_CLK_FIRST,
+};
+
+struct starfive_trng_data {
+	enum seq_rst_clk	seq_rst_clk;
+};
+
 struct starfive_trng {
 	struct device		*dev;
 	void __iomem		*base;
@@ -112,6 +129,7 @@ struct starfive_trng {
 	struct completion	random_done;
 	struct completion	reseed_done;
 	struct work_struct	work;
+	const struct starfive_trng_data *data;
 	u32			mode;
 	u32			mission;
 	bool			need_reseed;
@@ -209,7 +227,10 @@ err_hclk:
 
 static void starfive_trng_power_off(struct starfive_trng *trng, bool assert_rst)
 {
-	if (assert_rst && trng->rst_deassert) {
+	bool clk_first = trng->data->seq_rst_clk == SEQ_CLK_FIRST;
+	bool do_rst = assert_rst && trng->rst_deassert;
+
+	if (do_rst && !clk_first) {
 		reset_control_assert(trng->rst);
 		trng->rst_deassert = false;
 	}
@@ -218,6 +239,11 @@ static void starfive_trng_power_off(struct starfive_trng *trng, bool assert_rst)
 		clk_disable_unprepare(trng->ahb);
 		clk_disable_unprepare(trng->hclk);
 		trng->clk_on = false;
+	}
+
+	if (do_rst && clk_first) {
+		reset_control_assert(trng->rst);
+		trng->rst_deassert = false;
 	}
 }
 
@@ -516,7 +542,11 @@ static int starfive_trng_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, trng);
+
 	trng->dev = dev;
+	trng->data = device_get_match_data(dev);
+	if (!trng->data)
+		return dev_err_probe(dev, -ENODEV, "No match data\n");
 
 	trng->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(trng->base))
@@ -626,8 +656,17 @@ static int starfive_trng_resume(struct device *dev)
 	return 0;
 }
 
+static const struct starfive_trng_data jh7110_data = {
+	.seq_rst_clk = SEQ_RST_FIRST,
+};
+
+static const struct starfive_trng_data jhb100_data = {
+	.seq_rst_clk = SEQ_CLK_FIRST,
+};
+
 static const struct of_device_id trng_dt_ids[] = {
-	{ .compatible = "starfive,jh7110-trng" },
+	{ .compatible = "starfive,jh7110-trng", .data = &jh7110_data },
+	{ .compatible = "starfive,jhb100-trng", .data = &jhb100_data },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, trng_dt_ids);

@@ -43,9 +43,9 @@
 #define SEV_FW_FILE		"amd/sev.fw"
 #define SEV_FW_NAME_SIZE	64
 
-/* Minimum firmware version required for the SEV-SNP support */
+/* Minimum firmware version required for SEV-SNP support */
 #define SNP_MIN_API_MAJOR	1
-#define SNP_MIN_API_MINOR	51
+#define SNP_MIN_API_MINOR	55
 
 /*
  * Maximum number of firmware-writable buffers that might be specified
@@ -1523,7 +1523,7 @@ static int __sev_snp_init_locked(int *error, unsigned int max_snp_asid)
 		return 0;
 
 	if (!sev_version_greater_or_equal(SNP_MIN_API_MAJOR, SNP_MIN_API_MINOR)) {
-		dev_dbg(sev->dev, "SEV-SNP support requires firmware version >= %d:%d\n",
+		dev_err(sev->dev, "SEV-SNP support requires firmware version >= %d:%d\n",
 			SNP_MIN_API_MAJOR, SNP_MIN_API_MINOR);
 		return -EOPNOTSUPP;
 	}

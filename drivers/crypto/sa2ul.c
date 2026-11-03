@@ -652,7 +652,7 @@ void sa_set_swinfo(u8 eng_id, u16 sc_id, dma_addr_t sc_phys,
 static void sa_dump_sc(u8 *buf, dma_addr_t dma_addr)
 {
 #ifdef DEBUG
-	dev_info(sa_k3_dev, "Security context dump:: 0x%pad\n", &dma_addr);
+	dev_info(sa_k3_dev, "Security context dump: %pad\n", &dma_addr);
 	print_hex_dump(KERN_CONT, "", DUMP_PREFIX_OFFSET,
 		       16, 1, buf, SA_CTX_MAX_SZ, false);
 #endif
@@ -781,7 +781,7 @@ static void sa_cipher_cra_exit(struct crypto_skcipher *tfm)
 	struct sa_tfm_ctx *ctx = crypto_skcipher_ctx(tfm);
 	struct sa_crypto_data *data = dev_get_drvdata(sa_k3_dev);
 
-	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(0x%pad), 0x%x(0x%pad))\n",
+	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(%pad), 0x%x(%pad))\n",
 		__func__, tfm, ctx->enc.sc_id, &ctx->enc.sc_phys,
 		ctx->dec.sc_id, &ctx->dec.sc_phys);
 
@@ -822,7 +822,7 @@ static int sa_cipher_cra_init(struct crypto_skcipher *tfm)
 	crypto_skcipher_set_reqsize(tfm, crypto_skcipher_reqsize(child) +
 					 sizeof(struct skcipher_request));
 
-	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(0x%pad), 0x%x(0x%pad))\n",
+	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(%pad), 0x%x(%pad))\n",
 		__func__, tfm, ctx->enc.sc_id, &ctx->enc.sc_phys,
 		ctx->dec.sc_id, &ctx->dec.sc_phys);
 	return 0;
@@ -1446,7 +1446,7 @@ static int sa_sha_cra_init_alg(struct crypto_tfm *tfm, const char *alg_base)
 		}
 	}
 
-	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(0x%pad), 0x%x(0x%pad))\n",
+	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(%pad), 0x%x(%pad))\n",
 		__func__, tfm, ctx->enc.sc_id, &ctx->enc.sc_phys,
 		ctx->dec.sc_id, &ctx->dec.sc_phys);
 
@@ -1583,7 +1583,7 @@ static void sa_sha_cra_exit(struct crypto_tfm *tfm)
 	struct sa_tfm_ctx *ctx = crypto_tfm_ctx(tfm);
 	struct sa_crypto_data *data = dev_get_drvdata(sa_k3_dev);
 
-	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(0x%pad), 0x%x(0x%pad))\n",
+	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(%pad), 0x%x(%pad))\n",
 		__func__, tfm, ctx->enc.sc_id, &ctx->enc.sc_phys,
 		ctx->dec.sc_id, &ctx->dec.sc_phys);
 
@@ -1663,7 +1663,7 @@ static int sa_cra_init_aead(struct crypto_aead *tfm, const char *fallback)
 		return ret;
 	}
 
-	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(0x%pad), 0x%x(0x%pad))\n",
+	dev_dbg(sa_k3_dev, "%s(0x%p) sc-ids(0x%x(%pad), 0x%x(%pad))\n",
 		__func__, tfm, ctx->enc.sc_id, &ctx->enc.sc_phys,
 		ctx->dec.sc_id, &ctx->dec.sc_phys);
 

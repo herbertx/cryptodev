@@ -104,6 +104,8 @@ struct starfive_trng {
 	u32			mode;
 	u32			mission;
 	u32			reseed;
+	bool			clk_on;
+	bool			rst_deassert;
 	/* protects against concurrent write to ctrl register */
 	spinlock_t		write_lock;
 };
@@ -136,6 +138,60 @@ static inline void starfive_trng_irq_mask_clear(struct starfive_trng *trng)
 	u32 data = readl(trng->base + STARFIVE_ISTAT);
 
 	writel(data, trng->base + STARFIVE_ISTAT);
+}
+
+static int starfive_trng_power_on(struct starfive_trng *trng)
+{
+	int ret;
+
+	if (!trng->clk_on) {
+		ret = clk_prepare_enable(trng->hclk);
+		if (ret)
+			goto err_hclk;
+
+		ret = clk_prepare_enable(trng->ahb);
+		if (ret)
+			goto err_ahb;
+
+		trng->clk_on = true;
+	}
+
+	if (!trng->rst_deassert) {
+		ret = reset_control_deassert(trng->rst);
+		if (ret)
+			goto err_rst;
+
+		trng->rst_deassert = true;
+	}
+
+	return 0;
+
+err_rst:
+	clk_disable_unprepare(trng->ahb);
+err_ahb:
+	clk_disable_unprepare(trng->hclk);
+	trng->clk_on = false;
+err_hclk:
+	return ret;
+}
+
+static void starfive_trng_power_off(struct starfive_trng *trng, bool assert_rst)
+{
+	if (assert_rst && trng->rst_deassert) {
+		reset_control_assert(trng->rst);
+		trng->rst_deassert = false;
+	}
+
+	if (trng->clk_on) {
+		clk_disable_unprepare(trng->ahb);
+		clk_disable_unprepare(trng->hclk);
+		trng->clk_on = false;
+	}
+}
+
+static void starfive_trng_power_off_action(void *data)
+{
+	starfive_trng_power_off(data, true);
 }
 
 static int starfive_trng_cmd(struct starfive_trng *trng, u32 cmd, bool wait)
@@ -174,6 +230,13 @@ static int starfive_trng_init(struct hwrng *rng)
 {
 	struct starfive_trng *trng = to_trng(rng);
 	u32 mode, intr = 0;
+	int ret;
+
+	ret = pm_runtime_resume_and_get(trng->dev);
+	if (ret < 0) {
+		dev_err(trng->dev, "Failed to wake device for init: %d\n", ret);
+		return ret;
+	}
 
 	/* setup Auto Request/Age register */
 	writel(autoage, trng->base + STARFIVE_AUTO_AGE);
@@ -201,7 +264,11 @@ static int starfive_trng_init(struct hwrng *rng)
 
 	writel(mode, trng->base + STARFIVE_MODE);
 
-	return starfive_trng_cmd(trng, STARFIVE_CTRL_EXEC_RANDRESEED, 1);
+	ret = starfive_trng_cmd(trng, STARFIVE_CTRL_EXEC_RANDRESEED, 1);
+
+	pm_runtime_put_autosuspend(trng->dev);
+
+	return ret;
 }
 
 static irqreturn_t starfive_trng_irq(int irq, void *priv)
@@ -234,12 +301,17 @@ static irqreturn_t starfive_trng_irq(int irq, void *priv)
 static void starfive_trng_cleanup(struct hwrng *rng)
 {
 	struct starfive_trng *trng = to_trng(rng);
+	int ret;
 
-	writel(0, trng->base + STARFIVE_CTRL);
+	ret = pm_runtime_resume_and_get(trng->dev);
+	if (ret < 0) {
+		dev_err(trng->dev, "Failed to wake device for cleanup: %d\n", ret);
+		return;
+	}
 
-	reset_control_assert(trng->rst);
-	clk_disable_unprepare(trng->hclk);
-	clk_disable_unprepare(trng->ahb);
+	writel(STARFIVE_CTRL_EXEC_NOP, trng->base + STARFIVE_CTRL);
+
+	pm_runtime_put_sync_suspend(trng->dev);
 }
 
 static int starfive_trng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
@@ -247,7 +319,11 @@ static int starfive_trng_read(struct hwrng *rng, void *buf, size_t max, bool wai
 	struct starfive_trng *trng = to_trng(rng);
 	int ret;
 
-	pm_runtime_get_sync(trng->dev);
+	ret = pm_runtime_resume_and_get(trng->dev);
+	if (ret < 0) {
+		dev_warn_ratelimited(trng->dev, "Failed to wake device for read: %d\n", ret);
+		return ret;
+	}
 
 	if (trng->mode == PRNG_256BIT)
 		max = min_t(size_t, max, (STARFIVE_RAND_LEN * 8));
@@ -270,7 +346,7 @@ static int starfive_trng_read(struct hwrng *rng, void *buf, size_t max, bool wai
 	ret = max;
 
 out_put:
-	pm_runtime_put_sync_autosuspend(trng->dev);
+	pm_runtime_put_autosuspend(trng->dev);
 	return ret;
 }
 
@@ -320,17 +396,13 @@ static int starfive_trng_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, PTR_ERR(trng->rst),
 				     "Error getting hardware reset line\n");
 
-	ret = clk_prepare_enable(trng->hclk);
+	ret = starfive_trng_power_on(trng);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "Failed to power on\n");
+
+	ret = devm_add_action_or_reset(&pdev->dev, starfive_trng_power_off_action, trng);
 	if (ret)
 		return ret;
-
-	ret = clk_prepare_enable(trng->ahb);
-	if (ret)
-		goto disable_hclk;
-
-	ret = reset_control_deassert(trng->rst);
-	if (ret)
-		goto disable_ahb;
 
 	trng->rng.name = dev_driver_string(&pdev->dev);
 	trng->rng.init = starfive_trng_init;
@@ -343,59 +415,40 @@ static int starfive_trng_probe(struct platform_device *pdev)
 
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 100);
-	pm_runtime_enable(&pdev->dev);
+
+	ret = devm_pm_runtime_set_active_enabled(&pdev->dev);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "Failed to enable runtime PM\n");
 
 	ret = devm_hwrng_register(&pdev->dev, &trng->rng);
-	if (ret) {
-		pm_runtime_disable(&pdev->dev);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "Failed to register hwrng\n");
 
-		reset_control_assert(trng->rst);
-		ret = dev_err_probe(&pdev->dev, ret, "Failed to register hwrng\n");
-		goto disable_ahb;
-	}
+	pm_runtime_idle(&pdev->dev);
 
 	return 0;
-
-disable_ahb:
-	clk_disable_unprepare(trng->ahb);
-disable_hclk:
-	clk_disable_unprepare(trng->hclk);
-
-	return ret;
 }
 
-static int __maybe_unused starfive_trng_suspend(struct device *dev)
+static int starfive_trng_suspend(struct device *dev)
 {
 	struct starfive_trng *trng = dev_get_drvdata(dev);
 
-	clk_disable_unprepare(trng->hclk);
-	clk_disable_unprepare(trng->ahb);
+	starfive_trng_power_off(trng, false);
 
 	return 0;
 }
 
-static int __maybe_unused starfive_trng_resume(struct device *dev)
+static int starfive_trng_resume(struct device *dev)
 {
 	struct starfive_trng *trng = dev_get_drvdata(dev);
 	int ret;
 
-	ret = clk_prepare_enable(trng->hclk);
+	ret = starfive_trng_power_on(trng);
 	if (ret)
-		return ret;
-
-	ret = clk_prepare_enable(trng->ahb);
-	if (ret)
-		clk_disable_unprepare(trng->hclk);
+		dev_err(dev, "Failed to power on: %d\n", ret);
 
 	return ret;
 }
-
-static const struct dev_pm_ops starfive_trng_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(starfive_trng_suspend,
-				starfive_trng_resume)
-	SET_RUNTIME_PM_OPS(starfive_trng_suspend,
-			   starfive_trng_resume, NULL)
-};
 
 static const struct of_device_id trng_dt_ids[] __maybe_unused = {
 	{ .compatible = "starfive,jh7110-trng" },
@@ -403,11 +456,14 @@ static const struct of_device_id trng_dt_ids[] __maybe_unused = {
 };
 MODULE_DEVICE_TABLE(of, trng_dt_ids);
 
+static DEFINE_RUNTIME_DEV_PM_OPS(starfive_trng_pm_ops,
+				 starfive_trng_suspend, starfive_trng_resume, NULL);
+
 static struct platform_driver starfive_trng_driver = {
 	.probe	= starfive_trng_probe,
 	.driver	= {
 		.name		= "jh7110-trng",
-		.pm		= &starfive_trng_pm_ops,
+		.pm		= pm_ptr(&starfive_trng_pm_ops),
 		.of_match_table	= of_match_ptr(trng_dt_ids),
 	},
 };

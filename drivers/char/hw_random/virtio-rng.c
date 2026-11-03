@@ -244,26 +244,27 @@ static int virtrng_freeze(struct virtio_device *vdev)
 
 static int virtrng_restore(struct virtio_device *vdev)
 {
+	struct virtrng_info *vi;
 	int err;
 
 	err = probe_common(vdev);
-	if (!err) {
-		struct virtrng_info *vi = vdev->priv;
+	if (err)
+		return err;
+	vi = vdev->priv;
 
-		/*
-		 * Set hwrng_removed to ensure that virtio_read()
-		 * does not block waiting for data before the
-		 * registration is complete.
-		 */
-		vi->hwrng_removed = true;
-		err = hwrng_register(&vi->hwrng);
-		if (!err) {
-			vi->hwrng_register_done = true;
-			vi->hwrng_removed = false;
-		}
-	}
+	/*
+	 * Set hwrng_removed to ensure that virtio_read()
+	 * does not block waiting for data before the
+	 * registration is complete.
+	 */
+	vi->hwrng_removed = true;
+	err = hwrng_register(&vi->hwrng);
+	if (err)
+		return err;
 
-	return err;
+	vi->hwrng_register_done = true;
+	vi->hwrng_removed = false;
+	return 0;
 }
 
 static const struct virtio_device_id id_table[] = {

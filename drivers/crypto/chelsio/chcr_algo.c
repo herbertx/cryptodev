@@ -1439,6 +1439,7 @@ static int chcr_init_tfm(struct crypto_skcipher *tfm)
 	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
 	struct chcr_context *ctx = crypto_skcipher_ctx(tfm);
 	struct ablk_ctx *ablkctx = ABLK_CTX(ctx);
+	int ret;
 
 	ablkctx->sw_cipher = crypto_alloc_skcipher(alg->base.cra_name, 0,
 				CRYPTO_ALG_NEED_FALLBACK);
@@ -1450,7 +1451,11 @@ static int chcr_init_tfm(struct crypto_skcipher *tfm)
 	crypto_skcipher_set_reqsize(tfm, sizeof(struct chcr_skcipher_req_ctx) +
 					 crypto_skcipher_reqsize(ablkctx->sw_cipher));
 
-	return chcr_device_init(ctx);
+	ret = chcr_device_init(ctx);
+	if (ret)
+		crypto_free_skcipher(ablkctx->sw_cipher);
+
+	return ret;
 }
 
 static int chcr_rfc3686_init(struct crypto_skcipher *tfm)
@@ -1458,6 +1463,7 @@ static int chcr_rfc3686_init(struct crypto_skcipher *tfm)
 	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
 	struct chcr_context *ctx = crypto_skcipher_ctx(tfm);
 	struct ablk_ctx *ablkctx = ABLK_CTX(ctx);
+	int ret;
 
 	/*RFC3686 initialises IV counter value to 1, rfc3686(ctr(aes))
 	 * cannot be used as fallback in chcr_handle_cipher_response
@@ -1470,7 +1476,11 @@ static int chcr_rfc3686_init(struct crypto_skcipher *tfm)
 	}
 	crypto_skcipher_set_reqsize(tfm, sizeof(struct chcr_skcipher_req_ctx) +
 				    crypto_skcipher_reqsize(ablkctx->sw_cipher));
-	return chcr_device_init(ctx);
+	ret = chcr_device_init(ctx);
+	if (ret)
+		crypto_free_skcipher(ablkctx->sw_cipher);
+
+	return ret;
 }
 
 
@@ -3164,6 +3174,7 @@ static int chcr_aead_cra_init(struct crypto_aead *tfm)
 {
 	struct chcr_aead_ctx *aeadctx = AEAD_CTX(a_ctx(tfm));
 	struct aead_alg *alg = crypto_aead_alg(tfm);
+	int ret;
 
 	aeadctx->sw_cipher = crypto_alloc_aead(alg->base.cra_name, 0,
 					       CRYPTO_ALG_NEED_FALLBACK |
@@ -3174,7 +3185,11 @@ static int chcr_aead_cra_init(struct crypto_aead *tfm)
 		tfm, max(sizeof(struct chcr_aead_reqctx),
 			 sizeof(struct aead_request) +
 			 crypto_aead_reqsize(aeadctx->sw_cipher)));
-	return chcr_device_init(a_ctx(tfm));
+	ret = chcr_device_init(a_ctx(tfm));
+	if (ret)
+		crypto_free_aead(aeadctx->sw_cipher);
+
+	return ret;
 }
 
 static void chcr_aead_cra_exit(struct crypto_aead *tfm)

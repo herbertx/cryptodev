@@ -26,16 +26,21 @@ struct histb_rng_priv {
 };
 
 /*
- * Observed:
- * depth = 1 -> ~1ms
- * depth = 255 -> ~16ms
+ * Observed: the FIFO fills with 4 words at a time, roughly every 200us per
+ * unit of post-process depth, i.e. one batch per:
+ * depth = 144 -> ~30ms
+ * depth = 255 -> ~52ms
+ * Rewriting the control word delays the first batch by up to 300ms.
  */
+#define BATCH_TIMEOUT_US	(500 * USEC_PER_MSEC)
+
 static int histb_rng_wait(void __iomem *base)
 {
 	u32 val;
 
 	return readl_relaxed_poll_timeout(base + RNG_STAT, val,
-					  val & DATA_COUNT, 1000, 30 * 1000);
+					  val & DATA_COUNT, 1000,
+					  BATCH_TIMEOUT_US);
 }
 
 static void histb_rng_init(void __iomem *base, unsigned int depth)

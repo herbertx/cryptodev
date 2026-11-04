@@ -22,6 +22,7 @@
 
 struct histb_rng_priv {
 	struct hwrng rng;
+	struct device *dev;
 	void __iomem *base;
 };
 
@@ -71,8 +72,9 @@ static int histb_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 			if (!wait)
 				return i;
 			if (histb_rng_wait(base)) {
-				pr_err("failed to generate random number, generated %d\n",
-				       i);
+				dev_err(priv->dev,
+					"RNG timeout, generated %d of %zu bytes\n",
+					i, max);
 				return i ? i : -ETIMEDOUT;
 			}
 		}
@@ -142,6 +144,7 @@ static int histb_rng_probe(struct platform_device *pdev)
 	}
 
 	priv->base = base;
+	priv->dev = dev;
 	priv->rng.name = pdev->name;
 	priv->rng.read = histb_rng_read;
 	ret = devm_hwrng_register(dev, &priv->rng);

@@ -96,8 +96,6 @@ static struct device *sa_k3_dev;
  * @enc_eng_id: Encryption Engine ID supported by the SA hardware
  * @auth_eng_id: Authentication Engine ID
  * @iv_size: Initialization Vector size
- * @akey: Authentication key
- * @akey_len: Authentication key length
  * @enc: True, if this is an encode request
  */
 struct sa_cmdl_cfg {
@@ -105,8 +103,6 @@ struct sa_cmdl_cfg {
 	u8 enc_eng_id;
 	u8 auth_eng_id;
 	u8 iv_size;
-	const u8 *akey;
-	u16 akey_len;
 	bool enc;
 };
 
@@ -1375,8 +1371,6 @@ static int sa_sha_setup(struct sa_tfm_ctx *ctx, struct  algo_data *ad)
 	cfg.enc_eng_id = ad->enc_eng.eng_id;
 	cfg.auth_eng_id = ad->auth_eng.eng_id;
 	cfg.iv_size = 0;
-	cfg.akey = NULL;
-	cfg.akey_len = 0;
 
 	ctx->dev_data = dev_get_drvdata(sa_k3_dev);
 	/* Setup Encryption Security Context & Command label template */
@@ -1702,8 +1696,6 @@ static int sa_aead_setkey(struct crypto_aead *authenc,
 	cfg.enc_eng_id = ad->enc_eng.eng_id;
 	cfg.auth_eng_id = ad->auth_eng.eng_id;
 	cfg.iv_size = crypto_aead_ivsize(authenc);
-	cfg.akey = keys.authkey;
-	cfg.akey_len = keys.authkeylen;
 
 	/* Setup Encryption Security Context & Command label template */
 	if (sa_init_sc(&ctx->enc, ctx->dev_data->match_data, keys.enckey,

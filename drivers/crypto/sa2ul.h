@@ -279,18 +279,14 @@ struct sa_ctx_info {
  * @dev_data: struct sa_crypto_data pointer
  * @enc: struct sa_ctx_info for encryption
  * @dec: struct sa_ctx_info for decryption
- * @keylen: encrption/decryption keylength
  * @iv_idx: Initialization vector index
- * @key: encryption key
  * @fallback: SW fallback algorithm
  */
 struct sa_tfm_ctx {
 	struct sa_crypto_data *dev_data;
 	struct sa_ctx_info enc;
 	struct sa_ctx_info dec;
-	int keylen;
 	int iv_idx;
-	u32 key[AES_KEYSIZE_256 / sizeof(u32)];
 	/* for fallback */
 	union {
 		struct crypto_skcipher		*skcipher;

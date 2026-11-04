@@ -222,43 +222,24 @@ struct sa_cmdl_param_info {
 	u16	size;
 };
 
-/* Maximum length of Auxiliary data in 32bit words */
-#define SA_MAX_AUX_DATA_WORDS	8
-
 /**
  * struct sa_cmdl_upd_info: Command label updation info
  * @flags: flags in command label
  * @submode: Encryption submodes
  * @enc_size: Size of first pass encryption size
- * @enc_size2: Size of second pass encryption size
  * @enc_offset: Encryption payload offset in the packet
  * @enc_iv: Encryption initialization vector for pass2
- * @enc_iv2: Encryption initialization vector for pass2
- * @aad: Associated data
- * @payload: Payload info
  * @auth_size: Authentication size for pass 1
- * @auth_size2: Authentication size for pass 2
  * @auth_offset: Authentication payload offset
- * @auth_iv: Authentication initialization vector
- * @aux_key_info: Authentication aux key information
- * @aux_key: Aux key for authentication
  */
 struct sa_cmdl_upd_info {
 	u16	flags;
 	u16	submode;
 	struct sa_cmdl_param_info	enc_size;
-	struct sa_cmdl_param_info	enc_size2;
 	struct sa_cmdl_param_info	enc_offset;
 	struct sa_cmdl_param_info	enc_iv;
-	struct sa_cmdl_param_info	enc_iv2;
-	struct sa_cmdl_param_info	aad;
-	struct sa_cmdl_param_info	payload;
 	struct sa_cmdl_param_info	auth_size;
-	struct sa_cmdl_param_info	auth_size2;
 	struct sa_cmdl_param_info	auth_offset;
-	struct sa_cmdl_param_info	auth_iv;
-	struct sa_cmdl_param_info	aux_key_info;
-	u32				aux_key[SA_MAX_AUX_DATA_WORDS];
 };
 
 /*
@@ -330,13 +311,6 @@ struct sa_sha_req_ctx {
 	struct ahash_request	fallback_req;
 };
 
-enum sa_submode {
-	SA_MODE_GEN = 0,
-	SA_MODE_CCM,
-	SA_MODE_GCM,
-	SA_MODE_GMAC
-};
-
 /* Encryption algorithms */
 enum sa_ealg_id {
 	SA_EALG_ID_NONE = 0,        /* No encryption */
@@ -369,26 +343,6 @@ enum sa_aalg_id {
 	SA_AALG_ID_CMAC,          /* Cipher-based Mes. Auth. Code mode */
 	SA_AALG_ID_CBC_MAC,       /* Cipher Block Chaining */
 	SA_AALG_ID_AES_XCBC       /* AES Extended Cipher Block Chaining */
-};
-
-/*
- * Mode control engine algorithms used to index the
- * mode control instruction tables
- */
-enum sa_eng_algo_id {
-	SA_ENG_ALGO_ECB = 0,
-	SA_ENG_ALGO_CBC,
-	SA_ENG_ALGO_CFB,
-	SA_ENG_ALGO_OFB,
-	SA_ENG_ALGO_CTR,
-	SA_ENG_ALGO_F8,
-	SA_ENG_ALGO_F8F9,
-	SA_ENG_ALGO_GCM,
-	SA_ENG_ALGO_GMAC,
-	SA_ENG_ALGO_CCM,
-	SA_ENG_ALGO_CMAC,
-	SA_ENG_ALGO_CBCMAC,
-	SA_NUM_ENG_ALGOS
 };
 
 /**

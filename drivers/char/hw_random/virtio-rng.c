@@ -70,7 +70,7 @@ static void request_entropy(struct virtrng_info *vi)
 static unsigned int copy_data(struct virtrng_info *vi, void *buf,
 			      unsigned int size)
 {
-	unsigned int idx, avail;
+	unsigned int idx;
 
 	/*
 	 * vi->data_avail was set from the device-reported used.len and
@@ -81,13 +81,13 @@ static unsigned int copy_data(struct virtrng_info *vi, void *buf,
 	 * steered into adjacent slab memory, including under
 	 * speculation.
 	 */
-	avail = min(vi->data_avail, sizeof(vi->data));
-	if (vi->data_idx >= avail) {
+	if (vi->data_idx >= sizeof(vi->data)) {
 		vi->data_avail = 0;
 		request_entropy(vi);
 		return 0;
 	}
-	size = min(size, avail - vi->data_idx);
+	vi->data_avail = min(vi->data_avail, sizeof(vi->data) - vi->data_idx);
+	size = min(size, vi->data_avail);
 	idx = array_index_nospec(vi->data_idx, sizeof(vi->data));
 	memcpy(buf, vi->data + idx, size);
 	vi->data_idx += size;

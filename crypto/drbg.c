@@ -561,10 +561,20 @@ int __crypto_stdrng_get_bytes(void *buf, size_t len)
 
 	err = crypto_get_default_rng();
 	if (err)
-		return err;
+		goto out;
 
 	err = crypto_drbg_get_bytes(crypto_default_rng, buf, len, NULL, 0);
 	crypto_put_default_rng();
+
+out:
+	/*
+	 * On failure, fill the buffer using the normal Linux RNG rather than
+	 * leave it uninitialized.  This provides practical defense-in-depth for
+	 * callers that forget to check the error code.  (It makes no difference
+	 * for FIPS certifications; no entropy is claimed on failure anyway.)
+	 */
+	if (err)
+		get_random_bytes_wait(buf, len);
 	return err;
 }
 EXPORT_SYMBOL_GPL(__crypto_stdrng_get_bytes);
